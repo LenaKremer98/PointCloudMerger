@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv_nerf/
+
+# Logs
+*.log
+*.pid
+
+# Rohdaten und grosse Zwischenergebnisse (liegen unter ~/_Data/...)
+m4t_work/images/
+m4t_work/sparse/
+m4t_work/colmap/
+m4t_geo/
+gsplat_repo/
+nerf_data/
+nerf_out/
+renders/
+frames_equirect/
+fusion/
+colmap/
+sparse/
+images/
+
+# grosse Binaerdateien
+*.mp4
+*.gif
+*.osv
+*.OSV
+output/*.ply
+output/*.npz
+!output/m4t_cameras.npz
+output/*.png
+output/*.jpg
+align_tool.html

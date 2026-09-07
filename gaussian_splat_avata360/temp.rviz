@@ -1,0 +1,42 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
+Visualization Manager:
+  Global Options:
+    Fixed Frame: map
+    Background Color: 30; 30; 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 10
+      Plane Cell Count: 40
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Temperatur (Iron)
+      Enabled: true
+      Topic:
+        Value: /temperature_cloud
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Depth: 1
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: RGB8
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 160
+      Focal Point:
+        X: -70
+        Y: 6
+        Z: 0
+      Pitch: 0.9
+      Yaw: 0.7

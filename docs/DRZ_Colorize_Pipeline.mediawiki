@@ -1,0 +1,421 @@
+= Übereinanderlegen & Einfärben der DRZ-LiDAR-Karte – ausführliche Doku =
+
+Vollständige, schrittweise Beschreibung, wie die DRZ-LiDAR-Karte
+<code>PCD-DRZ_20-05-26/merged_FinlaDRZ.pcd</code> mit den Daten der DJI Matrice 4T
+(M4T) ausgerichtet und eingefärbt wurde – inkl. fehlgeschlagener Versuche,
+verwendeter Werkzeuge und Algorithmen.
+
+== Aufgabe & Ausgangslage ==
+
+* '''Gegeben:''' Eine LiDAR-Karte (~1,025 Mio Punkte, ''nur XYZ'', eigener SLAM-Frame, ''keine'' Trajektorie/Georeferenz) und zwei separate Drohnen-Aufnahmen (Avata-360-Video und Matrice-4T-Mapping-Mission).
+* '''Ziel:''' Die LiDAR-Karte realistisch einfärben (RGB + Thermal mit echten °C) und Visualisierungen (RViz, Orbit-Video, Montage) erzeugen.
+* '''Kernproblem:''' Die LiDAR-Karte ist nicht in einem Welt-Koordinatensystem verortet. Daher müssen die Foto-Kameras (die ihre Welt-Pose kennen) erst mit der LiDAR-Karte ''ausgerichtet'' werden, bevor projiziert werden kann.
+
+== Eingangsdaten ==
+
+{| class="wikitable"
+! Datei / Verzeichnis !! Inhalt
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ.pcd</code> || LiDAR-Karte, 1.025.183 Punkte, XYZ float32, PCD v0.7 binary
+|-
+| <code>m4t/DCIM/.../DJI_*_V.JPG</code> || 255 RGB-Nadir-Fotos der M4T (4032×3024, Gimbal-Pitch −90°, EXIF mit RTK-Geotag)
+|-
+| <code>m4t/DCIM/.../DJI_*_T.JPG</code> || 255 gepaarte Thermal-Fotos (1280×1024, FOV<sub>h</sub> 38,2°, ''radiometrisch'': eingebettete 640×512×16 bit Rohwerte + Kalibrierung)
+|-
+| <code>gaussian_splat_avata360/sparse/0</code> || COLMAP-SfM der Avata-360-Frames (344 perspektivische Views, 95k 3D-Punkte)
+|-
+| <code>gaussian_splat_avata360/m4t_work/sparse/0</code> || COLMAP-SfM der M4T-Bilder (alle 255 registriert, 116.215 3D-Punkte, <code>SIMPLE_RADIAL</code>, Bilder auf 1600×1200 skaliert)
+|-
+| <code>m4t_work/images/*.JPG</code> || M4T-Bilder in 1600×1200 (passend zu den COLMAP-Intrinsics)
+|-
+| <code>m4t_work/m4t_gps.json</code> || pro Bild [lat, lon, rel_alt] (RTK)
+|-
+| <code>avatar360/.../DJI_*.SRT</code> || Avata-Telemetrie pro Frame (lat/lon/rel_alt – Consumer-GPS, kein RTK)
+|-
+| <code>output/avata360_splat.ply</code> || 3DGS-Gauss-Splat trainiert auf sparse/0 (im COLMAP-Frame)
+|-
+| <code>m4t_geo/output/avata360_splat.ply</code> || dasselbe Splat trainiert auf der georeferenzierten m4t_geo-Rekonstruktion (rigide zum LiDAR-Frame)
+|}
+
+Verfügbare Werkzeuge:
+* '''ROS 2 Humble''' (RViz2, tf2, interactive_markers, rqt_reconfigure)
+* '''Open3D 0.19''' (Point Clouds, ICP, FPFH, Outlier-Filter, Offscreen-Rendering)
+* '''pycolmap''' (COLMAP-Modelle lesen)
+* '''gsplat 1.5.3 + PyTorch 2.4 + CUDA''' (echtes 3DGS-Rendering)
+* '''DJI Thermal SDK''' (Linux x64-Binary <code>dji_irp</code> + <code>libdirp.so</code>)
+* '''numpy / scipy''' (Umeyama, cKDTree, Rotation/Quaternion, lineare Algebra)
+* '''PIL''' (Bild-Sampling, Overlays, Colorbar)
+* '''ffmpeg''' (Encoding)
+
+== Grundalgorithmen (kurz) ==
+
+;'''Umeyama-Similarity'''
+:Geschlossen-formig: <code>(s, R, t) = Umeyama(src, dst)</code> minimiert ||s·R·src + t − dst||². Wird hier mehrfach genutzt, um Kamerazentren von einem Frame in einen anderen abzubilden.
+
+;'''to_enu'''
+:GPS (Grad) → lokales Ost-Nord-Hoch in Metern um Ursprung (lat0, lon0):
+:<source lang="python">
+east  = radians(lon-lon0) * cos(radians(lat0)) * R_Erde
+north = radians(lat-lat0)                       * R_Erde
+up    = rel_alt
+</source>
+
+;'''SIMPLE_RADIAL Projektion'''
+:Pinhole mit einem radialen Verzeichnungskoeffizienten <code>k</code>:
+:<source lang="python">
+p_cam = R_cw · P_world + t_cw         # in Kamera-Frame
+x = X/Z; y = Y/Z                       # normalisierte Koordinaten
+r2 = x*x + y*y; d = 1 + k*r2           # Verzeichnung
+u = f*x*d + cx; v = f*y*d + cy         # Pixel
+</source>
+
+;'''Voxel-Downsampling, SOR, Radius-Outlier'''
+:Standard-Open3D-Filter: <code>voxel_down_sample</code>, <code>remove_statistical_outlier(nb, std)</code>, <code>remove_radius_outlier(nb, r)</code>. Werden zur Floater-Entfernung und Vorbereitung für ICP/FPFH eingesetzt.
+
+;'''ICP (Iterative Closest Point)'''
+:<code>registration_icp</code> mit <code>TransformationEstimationPointToPlane</code> – minimiert Punkt-Ebene-Distanz. Benötigt Normalen auf dem Ziel (<code>estimate_normals</code>) und eine gute Startlage.
+
+;'''FPFH + RANSAC (globale Registrierung)'''
+:<code>compute_fpfh_feature</code> erzeugt 33-D Histogramme der lokalen Normalverteilung. <code>registration_ransac_based_on_feature_matching</code> findet eine grobe Ausrichtung ohne Startlage.
+
+== Phase 1 – Avata-Splat georeferenzieren (Sim3 COLMAP → ENU) ==
+
+Zweck: dem Avata-3DGS-Splat einen metrischen Maßstab geben (COLMAP ist
+maßstabslos), damit es später überhaupt mit der metrischen LiDAR-Karte
+vergleichbar ist.
+
+Skript: <code>georef_splat.py</code>
+
+Vorgehen:
+# COLMAP-Modell <code>sparse/0</code> mit pycolmap laden, Kamerazentren <code>C = −R_cw<sup>T</sup> · t_cw</code> extrahieren.
+# Per Bild aus der SRT-Datei der zugehörigen Zeitstempel <code>FPS = 45/88,2882</code> die GPS-Position holen und nach ENU konvertieren (lat0/lon0 = Mittel der Avata-GPS).
+# '''Umeyama'''(C_colmap → G_enu) → '''s ≈ 4,575''', GPS-Residuum '''Ø 2,81 m''' (Consumer-GPS, ''kein'' RTK).
+# Bereinigtes Splat <code>output/avata360_splat_clean.ply</code> laden, alle Means transformieren und als metrische RGB-Wolke <code>output/avata360_splat_metric_rgb.ply</code> schreiben (RGB = clamp(0.5 + C₀·f_dc, 0, 1) mit SH-Konstante C₀ = 0,28209…).
+# Transform <code>output/splat_georef.json</code> speichern.
+
+Ergebnis: das Splat liegt jetzt in einem ENU-Frame (Ursprung = Mittel der Avata-GPS), aber mit ~3 m Streuung (Consumer-GPS-Fehler).
+
+== Phase 2 – Splat in den LiDAR-Frame ausrichten ==
+
+Der ENU-Frame ist nicht der LiDAR-Frame – die LiDAR-Karte ist intern metrisch,
+aber ohne absolute Verortung. Es brauchte eine Transformation ENU → LiDAR.
+
+=== 2a – Automatische Registrierung (gescheitert) ===
+
+Skripte: <code>register_splat_lidar.py</code> (Yaw-Multistart + ICP),
+<code>register_fpfh.py</code> (FPFH+RANSAC + ICP).
+
+# Floater des Splats per Box-Crop (1-/99-Perzentil-Quader) und ''SOR'' raus.
+# Beide Wolken auf 0,5 m '''voxel-downsamplen''', Normalen schätzen.
+# '''Yaw-Multistart''': Schwerpunkte ausrichten, dann für 0°, 30°, …, 330° Yaw je ein zweistufiges Point-to-Plane-ICP (3 m grob, 1 m fein).
+# '''FPFH+RANSAC''' als unabhängige globale Methode.
+
+Ergebnis: '''gescheitert'''.
+* ICP-Fitness war ''für jedes Yaw'' ähnlich (~0,5) – kein „Einrasten".
+* FPFH-RANSAC lieferte instabile, widersprüchliche Lösungen (Fitness 0,34–0,42 über fünf Trials).
+* Visuell zeigte sich der Grund: das 360°-Photogrammetrie-Splat ist eine ''radiale Schüssel'' (Kameraflug umkreist die Lichtung), während die LiDAR-Karte ein ''Bodenscan mit Gebäuden'' ist. Die geometrische Überlappung ist zu eindeutig-strukturlos.
+
+=== 2b – Korrespondenz-Picking (gescheitert) ===
+
+Skript: <code>pick_points.py</code> (Open3D <code>VisualizerWithEditing</code>).
+
+Beide Wolken nacheinander öffnen, Shift+Linksklick auf gleiche physische Merkmale, danach Umeyama mit Skalierung auf die Korrespondenzen.
+
+Ergebnis: '''nicht belastbar'''. Vier gepickte Punkte ergaben:
+* Skalenkorrektur s = 0,56 (verdächtig),
+* Pick-Residuum Ø 6,1 m (für 4 Punkte zu hoch),
+* Paarweise Abstandsverhältnisse zwischen den Picks schwankten zwischen 0,65 und 1,69 – die „Korrespondenzen" entsprachen also '''nicht denselben physischen Orten'''. Höhenfarbe (LiDAR) vs. Photogrammetrie-Farbe (Splat) machen punktgenaues Wiedererkennen unmöglich.
+
+=== 2c – Interaktive Hand-Ausrichtung in RViz (funktioniert) ===
+
+Skripte: <code>rviz_align_node.py</code> + <code>align.rviz</code> + <code>save_current.py</code>.
+
+Konzept: nicht einzelne Punkte ansprechen, sondern die ''ganze'' Wolke per
+6-DOF-Greifer auf die LiDAR-Geometrie schieben.
+
+ROS-Aufbau:
+* '''PointCloud2''' <code>/lidar_cloud</code> (grau, statisch, Frame <code>map</code>).
+* '''PointCloud2''' <code>/splat_cloud</code> (farbig, Frame <code>splat</code>; Punkte um den Schwerpunkt zentriert, damit Drehungen intuitiv sind; voxel-ausgedünnt auf ~95 k für flüssige Wiedergabe).
+* '''TF''' <code>map → splat</code> wird vom Knoten gesendet, gesteuert durch eine '''Interactive-Marker'''-Position (Pfeile = Translation, Ringe = Rotation; tf2_ros-TransformBroadcaster).
+* Parameter '''<code>scale</code>''' (rqt_reconfigure-Slider) erlaubt eine zusätzliche Skalierung.
+
+Wichtige technische Falle (gelöst): RViz transformiert eine ''latched'' Wolke
+'''nicht''' neu, wenn die TF sich ändert. Lösung: den Splat-Cloud-Frame mit
+'''aktuellem Zeitstempel kontinuierlich republizieren''' (~12 Hz) – passend zur
+TF mit jeweils gleichem Stamp. Dann folgt die Wolke dem Greifer live.
+
+Speichern: <code>save_current.py</code> liest die aktuelle TF <code>map → splat</code> via
+tf2-Listener, kombiniert mit dem Scale, und berechnet aus der Greifer-Pose
+(R, p) und dem im Knoten verwendeten Schwerpunkt <code>c</code>:
+
+  P_world = R · ( scale · (P − c) ) + p
+         = (scale·R)·P + (p − scale·R·c)
+
+→ <code>output/manual_align.json</code> mit '''T = [scale·R | p − scale·R·c]''' (4×4, mappt ENU-Splat → LiDAR).
+
+== Phase 3 – Splat-basierte Einfärbung (Zwischenstand) ==
+
+Skript: <code>colorize_from_transform.py</code>.
+
+# Splat (ENU) per <code>T = manual_align</code> in LiDAR-Frame schieben.
+# '''scipy cKDTree''' über die transformierten Splat-Punkte.
+# Pro LiDAR-Punkt nächsten Splat-Nachbarn innerhalb '''THR''' suchen (Standard 1,0 m; auch 2,5 m und 4,0 m getestet).
+# Farbe übernehmen, sonst dunkelgrau lassen.
+
+Abdeckung @ 1 m / 2,5 m / 4 m = 28 / 46 / 62 % (das Splat deckt ''nur die Lichtung'' ab; rechts liegende Gebäude sind ''nicht'' im Splat → bleiben grau). Ausgabe: <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_colored.ply</code>.
+
+→ Limitiert sinnvoll, da die Avata-Aufnahme zu wenig Szenenfläche abdeckt. Deshalb kam Phase 4 (M4T-Reprojektion).
+
+== Phase 4 – M4T-Reprojektion (vollständige RGB-Einfärbung) ==
+
+Hier endet die „Splat-Welt" – jetzt arbeiten wir mit den 255 M4T-Bildern.
+
+=== 4.1 – COLMAP-Posen exportieren ===
+
+Skript: <code>export_m4t_cameras.py</code> (pycolmap) → <code>output/m4t_cameras.npz</code>.
+
+Pro Bild: <code>(R_cw, t_cw, C, [W,H,f,cx,cy,k])</code>. Alle Kameras verwenden dasselbe
+<code>SIMPLE_RADIAL</code>-Modell (Bilder 1600×1200, f ≈ 1126 px, cx=800, cy=600,
+k ≈ 0,033).
+
+=== 4.2 – M4T-COLMAP → ENU (Umeyama, RTK) ===
+
+Inline in <code>project_m4t_color.py</code>:
+* Pro Bild: GPS aus <code>m4t_work/m4t_gps.json</code> → ENU mit '''demselben''' lat0/lon0 wie in Phase 1 (aus <code>splat_georef.json</code>) → derselbe ENU-Frame wie der Avata-Splat.
+* Umeyama: '''s ≈ 18,05''', GPS-Residuum '''Ø 0,31 m, max 0,88 m''' (RTK-Qualität).
+
+=== 4.3 – Erste Ausrichtungskette M4T → LiDAR ===
+
+Über die zwei Sim3:
+* M4T-COLMAP → ENU (Schritt 4.2, RTK-genau),
+* ENU → LiDAR (Phase 2c, Hand-Ausrichtung).
+
+Komposition pro LiDAR-Punkt:
+
+  P_enu    = M_man^{-1} (P_lidar - t_man)          # T_manual^{-1}
+  P_colmap = (1/s_m) R_m^T (P_enu - t_m)           # (s_m, R_m, t_m) = Umeyama 4.2
+
+=== 4.4 – Sampling pro Punkt ===
+
+  Für jeden LiDAR-Punkt P_lidar:
+    P_colmap = ...
+    bestes (kleinstes) r = sqrt(x²+y²) über alle Kameras mit
+        Z > 0, 0 ≤ u < W, 0 ≤ v < H  (SIMPLE_RADIAL-Projektion)
+    Farbe = Bild_seite_(beste Kamera) [v, u]
+
+Begründung „kleinster Bildradius": die nadir-naheste Kamera für den Punkt
+liefert die geringste Verzeichnung und die kürzeste Aufnahmedistanz.
+Eine Occlusion-Prüfung erfolgt nicht – bei senkrecht (−90° Gimbal)
+aufgenommenen flachen Szenen unkritisch.
+
+Abdeckung '''100 %''' (255 Nadir-Bilder decken das gesamte Gebiet ab).
+Ausgabe: <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_m4t_colored.ply</code>.
+
+=== 4.5 – Verworfener Versuch: ICP-Verfeinerung der Ausrichtung ===
+
+Skript: <code>refine_m4t_icp.py</code>.
+
+# Die 116k M4T-COLMAP-Punkte (<code>export_m4t_points.py</code>) per Kette in den LiDAR-Frame transformieren.
+# '''ICP''' Point-to-Plane auf den downgesampelten LiDAR (Normalen geschätzt) mit absteigender Korrespondenzschwelle (5 → 2 → 1 → 0,5 m).
+# Zusammensetzen mit Hand-Transform: <code>T_refined = T_icp · T_manual</code>.
+
+Bewertung mit <code>eval_consistency.py</code>: Multiview-Farbstreuung sank '''von 0,183 auf 0,158'''.
+
+'''Verworfen''': visuell schlechter (Gebäudekanten verkippt). Die Metrik wird vom flächigen Grün/Boden dominiert; an den dünnen, kantenkritischen Bereichen ist sie unzuverlässig. → Hand-Ausrichtung war die maßgebliche.
+
+=== 4.6 – Hand-Feinjustage der M4T-Ausrichtung ===
+
+Skripte: <code>rviz_align_m4t.py</code> + <code>align_m4t.rviz</code> + <code>save_m4t.py</code>.
+
+Konzept: jetzt nicht mehr das Splat, sondern die '''farbigen M4T-COLMAP-Punkte''' selbst per 6-DOF-Greifer über die graue LiDAR-Wolke schieben.
+
+* Startlage: die M4T-Punkte werden bereits per Kette (4.3) in den LiDAR-Frame gelegt; um den Schwerpunkt zentriert in einem eigenen Frame <code>model</code>.
+* Greifer steuert <code>map → model</code>; <code>save_m4t.py</code> liest die TF und rekonstruiert den ''direkten'' Affin colmap → lidar (umgeht damit die Kette):
+
+  A = R_marker · A_init    mit  A_init = M_manual · (s_m · R_m)
+  b = R_marker · (b_init − centroid) + t_marker
+  mit b_init = M_manual · t_m + t_manual
+
+→ <code>output/m4t_affine.json</code> (A, b).
+
+Reprojektion-Aufruf:
+
+  python3 project_m4t_color.py --affine=output/m4t_affine.json \
+                               --out=../PCD-DRZ_20-05-26/merged_FinlaDRZ_m4t_manual2.ply
+
+Bestes RGB-Ergebnis: '''<code>PCD-DRZ_20-05-26/merged_FinlaDRZ_m4t_manual2.ply</code>''' (100 %, RTK + Hand-Feinausrichtung).
+
+== Phase 5 – Thermal-Reprojektion ==
+
+Skript: <code>project_m4t_thermal.py</code>.
+
+Dieselbe '''Posen-/Ausrichtungs-Kette''' wie für RGB, aber:
+* '''Thermal-Intrinsics''' (anders als RGB!): Bild 1280×1024, horizontaler FOV 38,2° → <code>f = (W/2)/tan(19,1°) ≈ 1848,2 px</code>, cx = 640, cy = 512, keine Verzeichnung modelliert.
+* '''Paarung _V ↔ _T''' nicht über den Datei-Zeitstempel (unterscheiden sich ~1 s), sondern über die '''Sequenznummer''' im Dateinamen (<code>DJI_..._<i>NNNN</i>_V/T.JPG</code>). Alle 255 paaren eindeutig.
+* '''Sampling''' identisch (beste Kamera = kleinster Bildradius), Pixelwert (8-bit White-Hot) direkt als Graustufen-RGB übernommen.
+
+Abdeckung: '''97,4 %''' (der schmalere Thermal-FOV lässt Randpunkte ohne Treffer).
+Ausgabe: <code>merged_FinlaDRZ_thermal.ply</code>. Mit Iron/Jet-Palette (Helligkeit → Farbverlauf, 2–98 % robuste Normierung): <code>..._thermal_iron.ply</code>, <code>..._thermal_jet.ply</code>.
+
+== Phase 6 – Echte Temperatur pro Punkt (DJI Thermal SDK) ==
+
+Die _T.JPG sind '''radiometrische R-JPEGs''' (EXIF-Tag <code>[DJI] ThermalData</code>:
+655.360 Bytes = 640×512 × 2 Byte 16-bit Rohwerte; dazu <code>ThermalCalibration</code>).
+Die Rohwerte sind '''nicht''' direkt °C – DJI rechnet sie mit einem proprietären
+Modell um.
+
+Werkzeug: '''DJI Thermal SDK''' (Linux x64-Binaries <code>libdirp.so</code>,
+<code>libv_dirp.so</code>, <code>libv_girp.so</code>, <code>libv_iirp.so</code> + Utility <code>dji_irp</code>).
+
+Aufruf pro Bild:
+
+  LD_LIBRARY_PATH=<libdir> dji_irp \
+      -s <T.JPG> -a measure -o out.f32 \
+      --measurefmt float32 --distance 25
+
+→ 640×512 float32 in °C (mit Default-Emissivität / Luftfeuchte und maximaler Distanz 25 m).
+
+Skript: <code>make_temperature_cloud.py</code>:
+# Alle 255 _T.JPG einmalig konvertieren (Cache in <code>/tmp/m4t_temps/</code>).
+# Pro LiDAR-Punkt: gleiche Ausrichtung (m4t_affine), Projektion mit der 640×512-Variante der Thermal-Intrinsics (<code>f ≈ 924,1 px</code>, cx=320, cy=256). Beste Kamera per kleinstem Radius. Temperatur aus <code>Tm[v, u]</code>.
+# Iron-Färbung über die robusten 2–98 %-Quantile der gültigen Temperaturen.
+
+→ <code>output/temp_cloud.npz</code> (xyz, temp [°C], rgb, scale_lo/hi).
+Statistik: 97,4 % mit Wert, Temperatur '''1,0 … 58,4 °C''' (Median 25,8 °C, Farbskala 15,9 … 50,1 °C).
+
+== Anzeige ==
+
+;'''RViz – farbig'''
+:<code>publish_colored.py <ply></code> sendet als '''PointCloud2''' (FLOAT32 xyz + gepacktes RGB) latched auf <code>/colored_cloud</code> (Frame <code>map</code>); <code>colored.rviz</code> zeigt sie mit Color-Transformer <code>RGB8</code>.
+
+;'''RViz – Temperatur ablesen'''
+:<code>publish_temperature.py</code> fügt zusätzlich ein <code>temperature</code> Float-Feld an die PointCloud2 an. Mit dem RViz-'''Select'''-Werkzeug (<code>temp.rviz</code>) zeigt das Selection-Panel den Wert pro angeklicktem Punkt. (RViz2 hat keine Hover-Tooltips.)
+
+;'''Eigener Viewer mit Live-Hover-Temperatur'''
+:<code>hover_temperature.py</code> (Open3D-GUI): SceneWidget mit Mausereignis-Callback; bei <code>MouseEvent.MOVE</code> wird <code>scene.render_to_depth_image</code> ausgelöst, der Tiefenwert am Cursor mit <code>camera.unproject(x, y, z, W, H)</code> in eine Weltkoordinate konvertiert, cKDTree-nächster Cloud-Punkt gefunden und dessen Temperatur in einem Label '''am Cursor''' angezeigt.
+
+== Echtes 3DGS-Splat in den Videos ==
+
+Skript: <code>render_splat_orbit.py</code> (venv mit gsplat + CUDA).
+
+* Eingang: <code>m4t_geo/output/avata360_splat.ply</code> (919.687 Gaussians).
+* Da <code>m4t_geo/sparse/0</code> denselben 255-Bilder-Datensatz wie <code>m4t_work</code> enthält, kann die Transformation '''m4t_geo → LiDAR''' direkt über die Kamerazentren berechnet werden:
+:: <code>compute_m4tgeo_to_lidar.py</code>: Umeyama( m4t_geo-Zentren → m4t_work-Zentren · m4t_affine ) → '''s = 1,0000, Residuum 0,000 m''' (rein rigide!).
+* Daher: Gaussians mit '''R · means + t''', Skalen unverändert, Quaternionen per <code>q' = q_R ∘ q</code> rotiert.
+* Rendering: '''gsplat.rasterization''' mit <code>render_mode="RGB"</code>, Farben aus DC: <code>clip(0.5 + C₀·f_dc, 0, 1)</code> (sh_degree weggelassen). Orbit-Viewmat in OpenCV-Konvention (Reihen = right, down, forward), <code>fx = fy = (H/2)/tan(FOV<sub>v</sub>/2)</code>, cx=W/2, cy=H/2.
+
+== Transform-Übersicht (alle Frames in einer Kette) ==
+
+  Avata-COLMAP-Frame (sparse/0)
+      │   georef_splat.py:  Sim3 (s≈4,575, R, t)  [Umeyama, Avata-GPS, Residuum 2,8 m]
+      ▼
+  ENU  (Ursprung lat0/lon0 = Avata-GPS-Mittel)
+      │   manual_align.json:  T_manual  [Hand-Ausrichtung in RViz]
+      ▼
+  LiDAR-Frame
+      ▲
+      │   m4t_affine.json:  (A, b)  [Hand-Feinausrichtung in RViz]
+      │
+  M4T-COLMAP-Frame (m4t_work/sparse/0)
+      │   Umeyama (RTK):  Sim3 (s_m≈18,05, R_m, t_m) [Residuum 0,3 m]
+      ▼
+  derselbe ENU-Frame (lat0/lon0 identisch)
+
+  m4t_geo-COLMAP-Frame  ──(rigide, s=1, Residuum 0 m)──►  LiDAR-Frame
+  (für 3DGS-Splat-Render im LiDAR-Frame)
+
+== Skripte-Inventar ==
+
+{| class="wikitable"
+! Skript !! Aufgabe
+|-
+| <code>georef_splat.py</code> || Avata-Splat: COLMAP → ENU (Umeyama mit SRT-GPS)
+|-
+| <code>register_splat_lidar.py</code> || (verworfen) Yaw-Multistart-ICP Splat ↔ LiDAR
+|-
+| <code>register_fpfh.py</code> || (verworfen) FPFH + RANSAC + ICP
+|-
+| <code>pick_points.py</code> || (verworfen) Korrespondenz-Picking
+|-
+| <code>compute_manual.py</code> || (verworfen) Umeyama auf Picks
+|-
+| <code>rviz_align_node.py</code>, <code>align.rviz</code> || Interactive-Marker-Ausrichtung Splat → LiDAR
+|-
+| <code>save_current.py</code> || TF map→splat → manual_align.json
+|-
+| <code>colorize_from_transform.py</code> || Splat-basierte Nachbar-Farbübertragung (THR-konfigurierbar)
+|-
+| <code>export_m4t_cameras.py</code> || COLMAP-Posen + Intrinsics → m4t_cameras.npz
+|-
+| <code>export_m4t_points.py</code> || COLMAP-3D-Punkte → m4t_points3d.npz
+|-
+| <code>project_m4t_color.py</code> || RGB-Reprojektion (Standardweg)
+|-
+| <code>refine_m4t_icp.py</code> || (verworfen) ICP-Verfeinerung
+|-
+| <code>eval_consistency.py</code> || Multiview-Farbstreuung als Ausrichtungs-Metrik
+|-
+| <code>rviz_align_m4t.py</code>, <code>align_m4t.rviz</code> || Hand-Feinjustage M4T-COLMAP-Punkte ↔ LiDAR
+|-
+| <code>save_m4t.py</code> || TF map→model → m4t_affine.json
+|-
+| <code>project_m4t_thermal.py</code> || Thermal-Reprojektion (mit Iron/Jet-Palette als Option)
+|-
+| <code>make_temperature_cloud.py</code> || DJI Thermal SDK → echte °C pro Punkt
+|-
+| <code>publish_colored.py</code> || RViz: PointCloud2 mit RGB (latched)
+|-
+| <code>publish_temperature.py</code> || RViz: PointCloud2 mit RGB + temperature-Feld
+|-
+| <code>hover_temperature.py</code> || Eigener Open3D-Viewer mit Live-Hover-Temperatur
+|-
+| <code>render_container_orbit.py</code> || Orbit-Video der RGB-Wolke (OffscreenRenderer)
+|-
+| <code>render_thermal_orbit.py</code>, <code>render_thermal_hotspot.py</code> || Thermal-Orbit (mit Colorbar / Hotspot-Kasten)
+|-
+| <code>compute_m4tgeo_to_lidar.py</code> || Sim3 m4t_geo-Splat-Frame → LiDAR
+|-
+| <code>render_splat_orbit.py</code> || gsplat-Render des 3DGS-Splats im LiDAR-Frame
+|-
+| <code>build_montage.py</code> || 5-min-Montage (Splat → Höhenfarbe → Schnitteffekt → RGB → Thermal)
+|}
+
+== Ergebnisdateien (Stand) ==
+
+{| class="wikitable"
+! Datei !! Inhalt
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_m4t_manual2.ply</code> || '''RGB-finale Wolke''', 100 %, Hand-Feinausrichtung
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_thermal.ply</code> || Thermal (White-Hot, 97,4 %)
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_thermal_iron.ply</code> || Thermal (Iron-Palette)
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_thermal_jet.ply</code> || Thermal (Jet-Palette)
+|-
+| <code>output/temp_cloud.npz</code> || xyz + Temperatur [°C] + Iron-RGB pro Punkt
+|-
+| <code>output/m4t_affine.json</code> || finale Ausrichtung m4t_work-COLMAP → LiDAR
+|-
+| <code>output/manual_align.json</code> || frühere Splat-Ausrichtung ENU → LiDAR
+|-
+| <code>output/m4tgeo_to_lidar.json</code> || rigider Transform m4t_geo → LiDAR (für 3DGS)
+|-
+| <code>PCD-DRZ_20-05-26/orbit_container_m4t.mp4</code> || Container-Orbit RGB
+|-
+| <code>PCD-DRZ_20-05-26/orbit_thermal_temp.mp4</code> || Thermal-Orbit mit Colorbar
+|-
+| <code>PCD-DRZ_20-05-26/orbit_thermal_hotspot.mp4</code> || Thermal-Orbit + Hotspot-Kasten
+|-
+| <code>PCD-DRZ_20-05-26/montage_splat_lidar_color_thermal.mp4</code> || '''5-min-Montage'''
+|-
+| <code>PCD-DRZ_20-05-26/montage_whatsapp.mp4</code> || Komprimierte 720p-Version (≤ 50 MB)
+|}
+
+== Genauigkeit & Limitierungen ==
+
+* '''RTK-Posen''' der M4T: Ø 0,31 m – kein Engpass.
+* '''Engpass:''' die ''manuelle'' COLMAP → LiDAR-Ausrichtung (Augenmaß im RViz). Erfahrungsgemäß einige Dezimeter bis ein paar Meter Restfehler.
+* '''Verdeckung''' wird ''nicht'' geprüft – bei Nadir + flachem Gelände unkritisch; an scharfen Gebäudekanten kann mal eine Dachfarbe auf eine Wand geraten.
+* '''Thermal-Absoluttemperatur''': dji_irp läuft mit Default-Emissivität (1,0) und maximal erlaubter Distanz (25 m statt tatsächlich ~50 m Flughöhe). Absolutwerte ± 1–2 °C ungenau, ''relativ'' präzise.
+* '''ICP-Refine wurde verworfen''', obwohl die Multiview-Konsistenz-Metrik sich verbesserte – die Metrik wird vom Boden dominiert und ist an den kritischen Kanten irreführend.

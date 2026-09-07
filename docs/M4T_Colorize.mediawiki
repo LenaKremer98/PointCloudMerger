@@ -1,0 +1,112 @@
+= LiDAR-Punktwolke mit M4T-Bildern einfärben (Reprojektion) =
+
+Dokumentiert, wie die DRZ-LiDAR-Karte <code>merged_FinlaDRZ.pcd</code> mit den RGB-Bildern
+der DJI Matrice 4T (M4T) eingefärbt wurde. Das Verfahren ist eine '''Reprojektion''':
+jeder LiDAR-Punkt wird in die Luftbilder zurückprojiziert und nimmt die Farbe des
+getroffenen Pixels an. Es werden ''nicht'' zwei Punktwolken verschmolzen.
+
+== Übersicht der Idee ==
+
+# Die M4T-Bilder haben bekannte '''Kameraposen''' (aus einer COLMAP-Rekonstruktion) und '''Intrinsics'''.
+# Über GPS/RTK + eine manuelle Feinausrichtung werden diese Kameras in den '''LiDAR-Koordinaten­rahmen''' gebracht.
+# Jeder LiDAR-Punkt wird in jede sichtbare Kamera projiziert; aus der am besten passenden Kamera wird die Farbe gesampelt.
+
+  LiDAR-Punkt  --(inv. Ausrichtung)-->  COLMAP-Welt  --(Kamera-Pose)-->  Kamerabild  -->  RGB
+
+== Eingangsdaten ==
+
+{| class="wikitable"
+! Datum !! Beschreibung
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ.pcd</code> || LiDAR-Karte, 1.025.183 Punkte, nur XYZ, eigener SLAM-Frame (''keine'' Trajektorie/Georeferenz)
+|-
+| <code>m4t/DCIM/.../DJI_*_V.JPG</code> || 255 RGB-Nadir-Fotos (4032×3024), Gimbal-Pitch −90°, RTK-Geotags
+|-
+| <code>m4t_work/sparse/0</code> || COLMAP-Rekonstruktion: alle 255 Bilder registriert, 116.215 Punkte, Kameramodell <code>SIMPLE_RADIAL</code> (Bilder 1600×1200, f≈1126, cx=800, cy=600, k≈0.033)
+|-
+| <code>m4t_work/images/*.JPG</code> || dieselben Bilder in 1600×1200 (exakt zu den Intrinsics passend) – daraus wird gesampelt
+|-
+| <code>m4t_work/m4t_gps.json</code> || pro Bild [lat, lon, rel_alt] (RTK)
+|}
+
+== Schritt 1 – Kameraposen & Intrinsics exportieren ==
+
+Skript: <code>export_m4t_cameras.py</code> (venv mit pycolmap) → <code>output/m4t_cameras.npz</code>.
+
+Pro Bild werden gespeichert:
+* '''R<sub>cw</sub>''', '''t<sub>cw</sub>''' – Rotation/Translation Welt→Kamera (3×4-Matrix aus COLMAP),
+* Kamerazentrum '''C''' = −R<sub>cw</sub><sup>T</sup>·t<sub>cw</sub>,
+* Intrinsics [W, H, f, cx, cy, k].
+
+== Schritt 2 – COLMAP-Frame georeferenzieren (ENU) ==
+
+Die COLMAP-Rekonstruktion hat einen ''willkürlichen'' Maßstab. Per '''Umeyama-Similarity'''
+werden die Kamerazentren '''C''' auf ihre GPS-Position im lokalen ENU-Frame abgebildet:
+
+  G_i = to_enu(lat_i, lon_i, rel_alt_i ; lat0, lon0)        # GPS -> Ost/Nord/Hoch [m]
+  (s, R, t) = Umeyama( C_colmap  ->  G_enu )                # Maßstab + Rotation + Translation
+
+* gleicher Ursprung <code>lat0/lon0</code> wie bei der Avata-Georef (aus <code>output/splat_georef.json</code>),
+* Ergebnis: '''s ≈ 18,05''', GPS-Residuum '''≈ 0,31 m''' (RTK-genau).
+
+<small>(to_enu: east = (lon−lon0)·cos(lat0)·R<sub>Erde</sub>, north = (lat−lat0)·R<sub>Erde</sub>, up = rel_alt; R<sub>Erde</sub>=6378137 m.)</small>
+
+== Schritt 3 – In den LiDAR-Frame ausrichten ==
+
+Die LiDAR-Karte ist '''nicht''' georeferenziert (keine Trajektorie). Die Transformation
+COLMAP→LiDAR wurde daher '''von Hand''' bestimmt und verfeinert:
+
+# Grob: das (georeferenzierte) Avata-Splat wurde in RViz per 6-DOF-Greifer auf die LiDAR-Karte gelegt (<code>manual_align.json</code>, ENU→LiDAR).
+# Fein: die M4T-COLMAP-Punkte wurden interaktiv exakt auf die LiDAR-Geometrie geschoben (<code>rviz_align_m4t.py</code> + <code>save_m4t.py</code>) → direkter Affin '''(A, b)''' in <code>output/m4t_affine.json</code>.
+
+Damit gilt die Vorwärts-Abbildung:
+
+  P_lidar = A · P_colmap + b
+
+== Schritt 4 – Reprojektion & Farb-Sampling ==
+
+Skript: <code>project_m4t_color.py</code> (System-Python, numpy + PIL).
+
+Für jeden LiDAR-Punkt '''P<sub>lidar</sub>''':
+
+  # 1) in COLMAP-Welt zuruecktransformieren
+  P_colmap = A^{-1} · (P_lidar - b)
+
+  # 2) in jede Kamera i projizieren (SIMPLE_RADIAL)
+  p_cam = R_cw[i] · P_colmap + t_cw[i]          # (X, Y, Z)
+  if Z > 0:
+      x = X/Z ;  y = Y/Z
+      r2 = x*x + y*y ;  d = 1 + k*r2            # radiale Verzeichnung
+      u = f*x*d + cx ;  v = f*y*d + cy          # Pixelkoordinate
+      gueltig, wenn 0 <= u < W und 0 <= v < H
+
+  # 3) beste Kamera waehlen: kleinster Bildradius r = sqrt(r2)
+  #    (Punkt moeglichst zentral/senkrecht unter der Kamera -> wenig Verzeichnung/Verdeckung)
+
+  # 4) Farbe = Pixel (u, v) dieser Kamera
+
+* '''Beste-Kamera-Kriterium:''' von allen Kameras, die den Punkt sehen, wird die genommen, in der der Punkt am nächsten zum Bildzentrum liegt (am ehesten senkrecht von oben → geringste Verzeichnung und Verdeckung). Eine Verdeckungsprüfung (z-Buffer) erfolgt ''nicht'' – bei Nadir-Aufnahmen über flachem Gelände unkritisch.
+* '''Abdeckung: 100 %''' – die 255 Nadir-Fotos decken das gesamte Gebiet ab.
+
+== Ergebnis ==
+
+{| class="wikitable"
+! Datei !! Inhalt
+|-
+| <code>PCD-DRZ_20-05-26/merged_FinlaDRZ_m4t_manual2.ply</code> || finale RGB-eingefärbte LiDAR-Wolke (Hand-Feinausrichtung), 1.025.183 Punkte, 100 %
+|-
+| <code>output/m4t_affine.json</code> || Transformation COLMAP→LiDAR (A, b)
+|-
+| <code>output/m4t_cameras.npz</code> || Kameraposen + Intrinsics
+|}
+
+Aufruf:
+
+  python3 project_m4t_color.py --affine=output/m4t_affine.json \
+                               --out=../PCD-DRZ_20-05-26/merged_FinlaDRZ_m4t_manual2.ply
+
+== Hinweise / Genauigkeit ==
+
+* Der Maßstab (Schritt 2) ist RTK-genau (~0,3 m); der limitierende Fehler ist die '''manuelle''' COLMAP→LiDAR-Ausrichtung (Schritt 3), da die LiDAR-Karte keine eigene Georeferenz hat.
+* Eine automatische ICP-Verfeinerung wurde getestet, war aber visuell schlechter (verkippte an Gebäudekanten) und wurde verworfen – die Hand-Ausrichtung ist maßgeblich.
+* Die '''Thermal'''-Variante (<code>project_m4t_thermal.py</code>) nutzt dieselben Posen + Ausrichtung, aber die Thermal-Intrinsics und die _T.JPG (Paarung über die Sequenznummer).

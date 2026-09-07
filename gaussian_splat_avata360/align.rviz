@@ -1,0 +1,57 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Global Options:
+    Fixed Frame: map
+    Background Color: 30; 30; 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 10
+      Plane Cell Count: 40
+    - Class: rviz_default_plugins/PointCloud2
+      Name: LiDAR (grau, fix)
+      Enabled: true
+      Topic:
+        Value: /lidar_cloud
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Depth: 1
+      Style: Points
+      Size (Pixels): 1
+      Color Transformer: RGB8
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Splat (farbig, beweglich)
+      Enabled: true
+      Topic:
+        Value: /splat_cloud
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Depth: 1
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: RGB8
+    - Class: rviz_default_plugins/InteractiveMarkers
+      Name: Greifer
+      Enabled: true
+      Interactive Markers Namespace: /splat_marker
+      Show Axes: true
+      Show Descriptions: true
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 160
+      Focal Point:
+        X: -70
+        Y: 6
+        Z: 0
+      Pitch: 1.0
+      Yaw: 0.7
