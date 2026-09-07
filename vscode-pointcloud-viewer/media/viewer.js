@@ -21,6 +21,9 @@
   const cutTopEl = document.getElementById('cuttop');
   const cutBotEl = document.getElementById('cutbot');
   const cutResetBtn = document.getElementById('cutreset');
+  const measBtn = document.getElementById('measure');
+  const measEl = document.getElementById('meas');
+  const measLabel = document.getElementById('measlabel');
 
   /* ------------------------------------------------------------ Matrizen */
   function mat4() { return new Float32Array(16); }
@@ -181,6 +184,7 @@
     min: [0, 0, 0],
     max: [0, 0, 0],
     radius: 1,
+    viewRadius: 1,
     hasRGB: false,
     scalarName: null,
     zLo: 0, zHi: 1,
@@ -189,6 +193,11 @@
   };
   let posBuf = null, rgbBuf = null, scalarBuf = null;
   let axisBuf = null, axisColBuf = null, axisLen = 1;
+  let cloudPos = null; // zentrierte Koordinaten, wird zum Anklicken gebraucht
+
+  // Messung: zwei angeklickte Punkte, Koordinaten zentriert
+  const meas = { on: false, a: null, b: null };
+  let measBuf = null, measColBuf = null;
 
   const cam = { yaw: -Math.PI / 4, pitch: 0.45, dist: 10, target: [0, 0, 0] };
   const view = mat4(), proj = mat4(), mvp = mat4();
@@ -229,7 +238,7 @@
 
   function resetView() {
     cam.target = [0, 0, 0];
-    cam.dist = Math.max(cloud.radius * 2.4, 1e-3);
+    cam.dist = Math.max(cloud.viewRadius * 2.2, 1e-3);
     cam.yaw = -Math.PI / 4;
     cam.pitch = 0.5;
     needsDraw = true;
@@ -313,6 +322,51 @@
       bindAttr(A.scalar, null, 1, gl.FLOAT, false);
       gl.drawArrays(gl.LINES, 0, 6);
     }
+
+    if (meas.a && measBuf) {
+      // Messmarken liegen immer obenauf, sonst verschwinden sie in der Wolke
+      gl.disable(gl.DEPTH_TEST);
+      gl.uniform1i(U.uMode, 0);
+      bindAttr(A.pos, measBuf, 3, gl.FLOAT, false);
+      bindAttr(A.rgb, measColBuf, 3, gl.UNSIGNED_BYTE, true);
+      bindAttr(A.scalar, null, 1, gl.FLOAT, false);
+      if (meas.b) {
+        // duenne Verbindungslinie. uRound muss dafuer aus sein, denn
+        // gl_PointCoord ist bei Linien undefiniert und der Kreistest im
+        // Fragment-Shader wuerde die ganze Linie verwerfen.
+        gl.uniform1i(U.uRound, 0);
+        gl.lineWidth(1);
+        gl.drawArrays(gl.LINES, 0, 2);
+      }
+      gl.uniform1i(U.uRound, 1);
+      gl.uniform1f(U.uPointSize, 10);
+      gl.drawArrays(gl.POINTS, 0, meas.b ? 2 : 1);
+      gl.enable(gl.DEPTH_TEST);
+    }
+
+    placeMeasLabel();
+  }
+
+  // Der Abstand steht auf der Mitte der Messlinie. Das Schild ist HTML und
+  // wird nach jedem Zeichnen auf die projizierte Mitte gesetzt.
+  function placeMeasLabel() {
+    if (!meas.a || !meas.b) {
+      measLabel.hidden = true;
+      return;
+    }
+    const x = (meas.a[0] + meas.b[0]) / 2;
+    const y = (meas.a[1] + meas.b[1]) / 2;
+    const z = (meas.a[2] + meas.b[2]) / 2;
+    const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+    if (cw <= 0) {
+      measLabel.hidden = true;
+      return;
+    }
+    const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
+    const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
+    measLabel.style.left = ((cx / cw * 0.5 + 0.5) * canvas.clientWidth) + 'px';
+    measLabel.style.top = ((0.5 - cy / cw * 0.5) * canvas.clientHeight) + 'px';
+    measLabel.hidden = false;
   }
 
   function loop() {
@@ -329,16 +383,26 @@
 
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
+  let downX = 0, downY = 0;
+
   canvas.addEventListener('pointerdown', function (e) {
     canvas.setPointerCapture(e.pointerId);
     dragging = (e.button === 0 && !e.shiftKey && !e.ctrlKey) ? 1 : 2;
     lastX = e.clientX;
     lastY = e.clientY;
+    downX = e.clientX;
+    downY = e.clientY;
   });
 
   canvas.addEventListener('pointerup', function (e) {
+    const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
     dragging = 0;
     try { canvas.releasePointerCapture(e.pointerId); } catch (err) { /* egal */ }
+    // Ein Klick ist ein Klick, solange die Maus dabei stehen bleibt
+    if (meas.on && e.button === 0 && moved < 5) {
+      const r = canvas.getBoundingClientRect();
+      addPick(e.clientX - r.left, e.clientY - r.top);
+    }
   });
 
   canvas.addEventListener('pointermove', function (e) {
@@ -373,7 +437,9 @@
   window.addEventListener('resize', function () { needsDraw = true; });
 
   window.addEventListener('keydown', function (e) {
-    if (e.key === 'r' || e.key === 'R') { resetView(); }
+    if (e.key === 'r' || e.key === 'R') resetView();
+    else if (e.key === 'm' || e.key === 'M') setMeasure(!meas.on);
+    else if (e.key === 'Escape') clearMeasure();
   });
 
   /* ------------------------------------------------------------ Bedienung */
@@ -493,6 +559,132 @@
 
   window.addEventListener('resize', paintCut);
 
+  /* ------------------------------------------------------------- Messen */
+  // Sucht den Punkt, welcher dem Klick am naechsten liegt. Es wird ueber alle
+  // Punkte gerechnet, bei einer Million sind das ein paar Millisekunden und
+  // damit billiger als ein zweiter Renderdurchgang mit Index-Farben.
+  function pickPoint(mx, my) {
+    if (!cloudPos) return -1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const radius = 16;
+    const cutLo = cutValue(cut.fLo);
+    const cutHi = cutValue(cut.fHi);
+    let best = -1;
+    let bestDepth = Infinity;
+    for (let i = 0; i < cloud.count; i++) {
+      const x = cloudPos[3 * i];
+      const y = cloudPos[3 * i + 1];
+      const z = cloudPos[3 * i + 2];
+      const hg = upZ ? z : y;
+      if (hg < cutLo || hg > cutHi) continue;
+      const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+      if (cw <= 0) continue;
+      const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
+      const sx = (cx / cw * 0.5 + 0.5) * w - mx;
+      if (sx > radius || sx < -radius) continue;
+      const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
+      const sy = (0.5 - cy / cw * 0.5) * h - my;
+      if (sy > radius || sy < -radius) continue;
+      if (sx * sx + sy * sy > radius * radius) continue;
+      if (cw < bestDepth) {
+        bestDepth = cw;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function original(p) {
+    return [p[0] + cloud.centroid[0], p[1] + cloud.centroid[1], p[2] + cloud.centroid[2]];
+  }
+
+  function fmt(v) {
+    return v.toFixed(2).replace('.', ',');
+  }
+
+  function vec3(i) {
+    return [cloudPos[3 * i], cloudPos[3 * i + 1], cloudPos[3 * i + 2]];
+  }
+
+  function clearMeasure() {
+    meas.a = null;
+    meas.b = null;
+    paintMeasure();
+    needsDraw = true;
+  }
+
+  function paintMeasure() {
+    if (!meas.b) measLabel.hidden = true;
+    if (!meas.on && !meas.a) {
+      measEl.hidden = true;
+      return;
+    }
+    measEl.hidden = false;
+    if (!meas.a) {
+      measEl.textContent = 'Messen aktiv, ersten Punkt anklicken';
+      return;
+    }
+    const A = original(meas.a);
+    let html = '<span class="a">A</span>  ' +
+      fmt(A[0]) + '  ' + fmt(A[1]) + '  ' + fmt(A[2]);
+    if (meas.b) {
+      const B = original(meas.b);
+      const dx = meas.b[0] - meas.a[0];
+      const dy = meas.b[1] - meas.a[1];
+      const dz = meas.b[2] - meas.a[2];
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      measLabel.textContent = fmt(d) + ' m';
+      const dh = upZ ? dz : dy;
+      const flat = Math.sqrt(Math.max(0, d * d - dh * dh));
+      html += '\n<span class="b">B</span>  ' +
+        fmt(B[0]) + '  ' + fmt(B[1]) + '  ' + fmt(B[2]) +
+        '\n<b>Abstand ' + fmt(d) + ' m</b>' +
+        '\nwaagerecht ' + fmt(flat) + ' m · Höhe ' + fmt(Math.abs(dh)) + ' m' +
+        '\nΔ ' + fmt(dx) + '  ' + fmt(dy) + '  ' + fmt(dz);
+    } else {
+      html += '\nzweiten Punkt anklicken';
+    }
+    measEl.innerHTML = html;
+  }
+
+  function uploadMeasure() {
+    if (!measBuf) return;
+    const a = meas.a || [0, 0, 0];
+    const b = meas.b || a;
+    gl.bindBuffer(gl.ARRAY_BUFFER, measBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0,
+      new Float32Array([a[0], a[1], a[2], b[0], b[1], b[2]]));
+  }
+
+  function addPick(mx, my) {
+    const i = pickPoint(mx, my);
+    if (i < 0) {
+      vscode.postMessage({ type: 'info', message: 'Kein Punkt an dieser Stelle getroffen' });
+      return;
+    }
+    const p = vec3(i);
+    if (!meas.a || meas.b) {
+      meas.a = p;
+      meas.b = null;
+    } else {
+      meas.b = p;
+    }
+    uploadMeasure();
+    paintMeasure();
+    needsDraw = true;
+  }
+
+  function setMeasure(on) {
+    meas.on = on;
+    measBtn.classList.toggle('an', on);
+    canvas.classList.toggle('messen', on);
+    if (!on) clearMeasure();
+    else paintMeasure();
+  }
+
+  measBtn.addEventListener('click', function () { setMeasure(!meas.on); });
+
   /* ------------------------------------------------------------- Aufbau */
   function percentile(values, count, stride, lo, hi) {
     const step = Math.max(1, Math.floor(count / 300000));
@@ -545,6 +737,20 @@
     cloud.hasRGB = !!data.colors;
     cloud.scalarName = data.scalarName;
 
+    // Fuer die Startansicht zaehlt nicht die Bounding-Box, sondern wo die
+    // Punkte wirklich liegen. Sonst schiebt ein einzelner Ausreisser die
+    // Kamera so weit weg, dass die Wolke als Fleck in der Mitte steht.
+    const dstep = Math.max(1, Math.floor(n / 200000));
+    const dists = [];
+    for (let i = 0; i < n; i += dstep) {
+      const d = Math.hypot(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]);
+      if (isFinite(d)) dists.push(d);
+    }
+    dists.sort(function (a, b) { return a - b; });
+    cloud.viewRadius = dists.length
+      ? (dists[Math.floor((dists.length - 1) * 0.95)] || cloud.radius)
+      : cloud.radius;
+
     const zp = percentile(pos.subarray(2), n, 3, 0.02, 0.98);
     cloud.zLo = zp[0]; cloud.zHi = zp[1];
     const yp = percentile(pos.subarray(1), n, 3, 0.02, 0.98);
@@ -554,9 +760,18 @@
       cloud.sLo = sp[0]; cloud.sHi = sp[1];
     }
 
+    cloudPos = pos;
     posBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
     gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+
+    measBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, measBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(6), gl.DYNAMIC_DRAW);
+    measColBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, measColBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array([255, 171, 77, 88, 214, 255]), gl.STATIC_DRAW);
+    clearMeasure();
 
     if (data.colors) {
       rgbBuf = gl.createBuffer();

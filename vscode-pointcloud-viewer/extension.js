@@ -111,12 +111,15 @@ class PointCloudEditorProvider {
   <span class="grp">
     <label><input id="bg" type="checkbox"${settings.background === 'hell' ? ' checked' : ''}> Hell</label>
   </span>
+  <span class="grp"><button id="measure" title="zwei Punkte anklicken (m)">Messen</button></span>
   <span class="grp"><button id="reset">Ansicht zurücksetzen</button></span>
   <span class="spacer"></span>
   <span id="head"></span>
 </div>
 <div id="stage">
   <canvas id="gl"></canvas>
+  <div id="meas" hidden></div>
+  <div id="measlabel" hidden></div>
   <div id="cut">
     <div id="cuttop" class="cutval">–</div>
     <div id="cuttrack">

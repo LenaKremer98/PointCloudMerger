@@ -20,6 +20,11 @@ Datei in diesen Formaten.
   sichtbare Schicht auf, wie in einem Schichtmodell. Damit lässt sich das Dach
   abnehmen und in ein Gebäude hineinschauen. Die Höhen an den Griffen stehen in
   Metern in den Originalkoordinaten der Datei.
+- **Messen** von Punkt zu Punkt. Zwei Klicks setzen die Marken, dazwischen
+  liegt eine dünne Linie, und der Abstand steht in Metern direkt an dieser
+  Linie. Unten links stehen beide Punkte in Originalkoordinaten, dazu der
+  Abstand, der waagerechte Anteil, der Höhenunterschied und die Differenz je
+  Achse.
 - Achsenkreuz am Ursprung der Originaldaten, Z-up oder Y-up umschaltbar,
   heller oder dunkler Hintergrund.
 - Statuszeile mit Punktzahl, Format, Bounds und Schwerpunkt.
@@ -38,7 +43,16 @@ Netz nachgeladen und es gibt keinen Build-Schritt.
 | auf die Leiste klicken | den näher liegenden Griff dorthin holen |
 | Mausrad über der Leiste | die ganze Schicht nach oben oder unten schieben |
 | `alles` | Schnitt aufheben |
+| `Messen` oder `m` | Messen ein- und ausschalten |
+| Klick bei aktivem Messen | Punkt A, dann Punkt B setzen, ein dritter Klick fängt neu an |
+| `Esc` | Messung verwerfen |
 | `r` | Ansicht zurücksetzen |
+
+Beim Messen wird der Punkt genommen, welcher dem Klick am nächsten liegt und
+dabei der Kamera am nächsten steht. Gesucht wird nur unter den sichtbaren
+Punkten, ein aktiver Höhenschnitt schließt also alles Weggeschnittene aus.
+Gemessen wird in den Einheiten der Datei, bei den Wolken aus diesem Repo sind
+das Meter.
 
 ## Installieren
 
