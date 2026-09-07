@@ -93,6 +93,24 @@ hier irreführend. `merged_FinlaDRZ_m4t_refined.ply` also nicht verwenden.
 Die verworfenen Skripte liegen trotzdem im Repo, damit die Doku vollständig
 bleibt.
 
+## Wolken in VS Code anschauen
+
+Im Ordner `vscode-pointcloud-viewer/` liegt eine kleine VS-Code-Extension,
+welche `.pcd` und `.ply` direkt im Editor darstellt, statt die Datei als
+Binärmüll zu öffnen. Sie liest PCD in `ascii`, `binary` und
+`binary_compressed` sowie PLY in `ascii` und beiden Binärvarianten. Gefärbt
+wird nach RGB, Höhe oder einem Skalarfeld wie `intensity`.
+
+```bash
+ln -sfn "$PWD/vscode-pointcloud-viewer" \
+        ~/.vscode/extensions/lenakremer.pointcloud-viewer-0.1.0
+```
+
+Danach VS Code neu starten. Näheres in
+[vscode-pointcloud-viewer/README.md](vscode-pointcloud-viewer/README.md).
+
+![Punktwolken-Viewer in VS Code](bilder/vscode-viewer.png)
+
 ## Struktur
 
 ```
@@ -104,6 +122,7 @@ gaussian_splat_avata360/            alle Skripte und RViz-Konfigurationen
   output/                           Transformationen, Kameraposen
   m4t_work/m4t_gps.json             RTK-Geotag je Bild
 PCD-DRZ_20-05-26/                   Punktwolken
+vscode-pointcloud-viewer/           VS-Code-Extension für .pcd und .ply
 bilder/                             Renderings für die Doku
 ```
 

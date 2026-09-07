@@ -1,0 +1,133 @@
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  background: var(--vscode-editorWidget-background, transparent);
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+#bar .grp {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+#bar label {
+  opacity: 0.8;
+}
+
+#bar .spacer {
+  flex: 1 1 auto;
+}
+
+#head {
+  opacity: 0.65;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+select, button {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--vscode-dropdown-foreground, inherit);
+  background: var(--vscode-dropdown-background, transparent);
+  border: 1px solid var(--vscode-dropdown-border, rgba(128, 128, 128, 0.4));
+  border-radius: 3px;
+  padding: 2px 5px;
+}
+
+button {
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+input[type="range"] {
+  width: 90px;
+  vertical-align: middle;
+}
+
+#sizeval {
+  width: 1.2em;
+  text-align: right;
+  opacity: 0.8;
+}
+
+#gl {
+  flex: 1 1 auto;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+#gl:active {
+  cursor: grabbing;
+}
+
+#status {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  font-size: 0.9em;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+#overlaytext {
+  padding: 10px 18px;
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, #222);
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  max-width: 70%;
+  text-align: center;
+}
+
+#overlaytext.err {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+body.light #overlay {
+  background: rgba(255, 255, 255, 0.4);
+}

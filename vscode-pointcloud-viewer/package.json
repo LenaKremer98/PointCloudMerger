@@ -1,0 +1,62 @@
+{
+  "name": "pointcloud-viewer",
+  "displayName": "Punktwolken-Viewer (PCD/PLY)",
+  "description": "Zeigt .pcd- und .ply-Punktwolken direkt in VS Code an, mit RGB, Hoehenfarbe und Intensitaet.",
+  "version": "0.1.0",
+  "publisher": "lenakremer",
+  "license": "MIT",
+  "categories": [
+    "Visualization"
+  ],
+  "keywords": [
+    "pointcloud",
+    "pcd",
+    "ply",
+    "lidar",
+    "punktwolke"
+  ],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "pointcloudViewer.cloud",
+        "displayName": "Punktwolken-Viewer",
+        "selector": [
+          { "filenamePattern": "*.pcd" },
+          { "filenamePattern": "*.PCD" },
+          { "filenamePattern": "*.ply" },
+          { "filenamePattern": "*.PLY" }
+        ],
+        "priority": "default"
+      }
+    ],
+    "configuration": {
+      "title": "Punktwolken-Viewer",
+      "properties": {
+        "pointcloudViewer.pointSize": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Punktgroesse in Pixeln beim Oeffnen."
+        },
+        "pointcloudViewer.background": {
+          "type": "string",
+          "enum": ["dunkel", "hell"],
+          "default": "dunkel",
+          "description": "Hintergrund der 3D-Ansicht."
+        },
+        "pointcloudViewer.upAxis": {
+          "type": "string",
+          "enum": ["z", "y"],
+          "default": "z",
+          "description": "Welche Achse zeigt nach oben. LiDAR-Daten sind meist Z-up."
+        }
+      }
+    }
+  }
+}
