@@ -16,6 +16,10 @@ Datei in diesen Formaten.
   `intensity`, oder einfarbig. Angeboten wird nur, was die Datei hergibt.
 - Höhen- und Skalarskala werden auf das 2- bis 98-Perzentil gestreckt, sonst
   fressen einzelne Ausreißer den ganzen Farbbereich.
+- **Höhenschnitt** über die Leiste am rechten Rand. Zwei Griffe spannen die
+  sichtbare Schicht auf, wie in einem Schichtmodell. Damit lässt sich das Dach
+  abnehmen und in ein Gebäude hineinschauen. Die Höhen an den Griffen stehen in
+  Metern in den Originalkoordinaten der Datei.
 - Achsenkreuz am Ursprung der Originaldaten, Z-up oder Y-up umschaltbar,
   heller oder dunkler Hintergrund.
 - Statuszeile mit Punktzahl, Format, Bounds und Schwerpunkt.
@@ -30,6 +34,10 @@ Netz nachgeladen und es gibt keinen Build-Schritt.
 | linke Maustaste ziehen | drehen |
 | rechte Maustaste oder Umschalt und ziehen | verschieben |
 | Mausrad | zoomen |
+| Griff an der rechten Leiste ziehen | obere oder untere Schnittebene setzen |
+| auf die Leiste klicken | den näher liegenden Griff dorthin holen |
+| Mausrad über der Leiste | die ganze Schicht nach oben oder unten schieben |
+| `alles` | Schnitt aufheben |
 | `r` | Ansicht zurücksetzen |
 
 ## Installieren

@@ -115,7 +115,19 @@ class PointCloudEditorProvider {
   <span class="spacer"></span>
   <span id="head"></span>
 </div>
-<canvas id="gl"></canvas>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <div id="cut">
+    <div id="cuttop" class="cutval">–</div>
+    <div id="cuttrack">
+      <div id="cutband"></div>
+      <div class="cuthandle" id="cuthi" title="obere Schnittebene"></div>
+      <div class="cuthandle" id="cutlo" title="untere Schnittebene"></div>
+    </div>
+    <div id="cutbot" class="cutval">–</div>
+    <button id="cutreset" title="ganze Höhe zeigen">alles</button>
+  </div>
+</div>
 <div id="status">lädt …</div>
 <div id="overlay"><div id="overlaytext">lädt …</div></div>
 <script nonce="${n}">

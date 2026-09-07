@@ -14,6 +14,13 @@
   const axesBox = document.getElementById('axes');
   const bgBox = document.getElementById('bg');
   const resetBtn = document.getElementById('reset');
+  const cutTrack = document.getElementById('cuttrack');
+  const cutBand = document.getElementById('cutband');
+  const cutHiEl = document.getElementById('cuthi');
+  const cutLoEl = document.getElementById('cutlo');
+  const cutTopEl = document.getElementById('cuttop');
+  const cutBotEl = document.getElementById('cutbot');
+  const cutResetBtn = document.getElementById('cutreset');
 
   /* ------------------------------------------------------------ Matrizen */
   function mat4() { return new Float32Array(16); }
@@ -73,6 +80,8 @@
     'uniform int uUpZ;',
     'uniform float uLo;',
     'uniform float uHi;',
+    'uniform float uCutLo;',
+    'uniform float uCutHi;',
     'uniform vec3 uFlat;',
     'varying vec3 vColor;',
     'vec3 turbo(float t){',
@@ -88,6 +97,14 @@
     '  return clamp(vec3(r, g, b), 0.0, 1.0);',
     '}',
     'void main() {',
+    '  float cutH = (uUpZ == 1) ? aPos.z : aPos.y;',
+    '  if (cutH < uCutLo || cutH > uCutHi) {',
+    '    // ausserhalb der Schicht: aus dem Clip-Raum schieben',
+    '    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);',
+    '    gl_PointSize = 0.0;',
+    '    vColor = vec3(0.0);',
+    '    return;',
+    '  }',
     '  gl_Position = uMVP * vec4(aPos, 1.0);',
     '  gl_PointSize = uPointSize;',
     '  if (uMode == 0) {',
@@ -150,9 +167,10 @@
     scalar: gl.getAttribLocation(prog, 'aScalar')
   };
   const U = {};
-  ['uMVP', 'uPointSize', 'uMode', 'uUpZ', 'uLo', 'uHi', 'uFlat', 'uRound'].forEach(function (n) {
-    U[n] = gl.getUniformLocation(prog, n);
-  });
+  ['uMVP', 'uPointSize', 'uMode', 'uUpZ', 'uLo', 'uHi', 'uCutLo', 'uCutHi', 'uFlat', 'uRound']
+    .forEach(function (n) {
+      U[n] = gl.getUniformLocation(prog, n);
+    });
 
   gl.enable(gl.DEPTH_TEST);
 
@@ -180,6 +198,14 @@
   let showAxes = true;
   let light = bgBox.checked;
   let needsDraw = true;
+
+  // Hoehenschnitt: Anteile 0..1 ueber die volle Hoehe der Wolke.
+  // fLo ist die untere, fHi die obere Schnittebene.
+  const cut = { fLo: 0, fHi: 1, min: 0, max: 1 };
+
+  function cutValue(f) {
+    return cut.min + f * (cut.max - cut.min);
+  }
 
   function fail(msg) {
     overlay.style.display = 'flex';
@@ -267,11 +293,17 @@
     gl.uniform1f(U.uLo, lo);
     gl.uniform1f(U.uHi, hi);
     gl.uniform1i(U.uMode, mode);
+    gl.uniform1f(U.uCutLo, cutValue(cut.fLo));
+    gl.uniform1f(U.uCutHi, cutValue(cut.fHi));
 
     bindAttr(A.pos, posBuf, 3, gl.FLOAT, false);
     bindAttr(A.rgb, rgbBuf, 3, gl.UNSIGNED_BYTE, true);
     bindAttr(A.scalar, scalarBuf, 1, gl.FLOAT, false);
     gl.drawArrays(gl.POINTS, 0, cloud.count);
+
+    // Hilfsgeometrie steht ausserhalb des Schnitts
+    gl.uniform1f(U.uCutLo, -3.4e38);
+    gl.uniform1f(U.uCutHi, 3.4e38);
 
     if (showAxes && axisBuf) {
       gl.uniform1i(U.uMode, 0);
@@ -356,6 +388,9 @@
   });
   upSel.addEventListener('change', function () {
     upZ = upSel.value === 'z';
+    cut.fLo = 0;
+    cut.fHi = 1;
+    setCutRange();
     resetView();
   });
   axesBox.addEventListener('change', function () {
@@ -368,6 +403,95 @@
     needsDraw = true;
   });
   resetBtn.addEventListener('click', resetView);
+
+  /* -------------------------------------------------------- Hoehenschnitt */
+  // Die Anzeige rechnet in Originalkoordinaten, gerechnet wird zentriert.
+  function cutOffset() {
+    return upZ ? cloud.centroid[2] : cloud.centroid[1];
+  }
+
+  function paintCut() {
+    // In Prozent, damit die Groesse der Leiste beim Zeichnen keine Rolle spielt
+    const pHi = (1 - cut.fHi) * 100;
+    const pLo = (1 - cut.fLo) * 100;
+    cutHiEl.style.top = pHi + '%';
+    cutLoEl.style.top = pLo + '%';
+    cutBand.style.top = pHi + '%';
+    cutBand.style.height = Math.max(0, pLo - pHi) + '%';
+    const off = cutOffset();
+    cutTopEl.textContent = (cutValue(cut.fHi) + off).toFixed(1) + ' m';
+    cutBotEl.textContent = (cutValue(cut.fLo) + off).toFixed(1) + ' m';
+  }
+
+  function setCutRange() {
+    // volle Spanne der Wolke in der Hochachse, zentrierte Koordinaten
+    cut.min = upZ ? (cloud.min[2] - cloud.centroid[2]) : (cloud.min[1] - cloud.centroid[1]);
+    cut.max = upZ ? (cloud.max[2] - cloud.centroid[2]) : (cloud.max[1] - cloud.centroid[1]);
+    if (cut.max - cut.min < 1e-6) cut.max = cut.min + 1e-6;
+    paintCut();
+  }
+
+  function dragHandle(el, which) {
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      el.setPointerCapture(e.pointerId);
+      const move = function (ev) {
+        const r = cutTrack.getBoundingClientRect();
+        let f = 1 - (ev.clientY - r.top) / Math.max(1, r.height);
+        f = Math.max(0, Math.min(1, f));
+        if (which === 'hi') cut.fHi = Math.max(f, cut.fLo);
+        else cut.fLo = Math.min(f, cut.fHi);
+        paintCut();
+        needsDraw = true;
+      };
+      const up = function (ev) {
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        try { el.releasePointerCapture(ev.pointerId); } catch (err) { /* egal */ }
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      move(e);
+    });
+  }
+
+  dragHandle(cutHiEl, 'hi');
+  dragHandle(cutLoEl, 'lo');
+
+  // Auf die Leiste klicken zieht den naechstgelegenen Griff dorthin
+  cutTrack.addEventListener('pointerdown', function (e) {
+    const r = cutTrack.getBoundingClientRect();
+    let f = 1 - (e.clientY - r.top) / Math.max(1, r.height);
+    f = Math.max(0, Math.min(1, f));
+    if (Math.abs(f - cut.fHi) < Math.abs(f - cut.fLo)) cut.fHi = Math.max(f, cut.fLo);
+    else cut.fLo = Math.min(f, cut.fHi);
+    paintCut();
+    needsDraw = true;
+  });
+
+  cutResetBtn.addEventListener('click', function () {
+    cut.fLo = 0;
+    cut.fHi = 1;
+    paintCut();
+    needsDraw = true;
+  });
+
+  // Mausrad ueber der Leiste verschiebt die ganze Schicht, ohne sie zu aendern
+  document.getElementById('cut').addEventListener('wheel', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const d = (e.deltaY > 0 ? -1 : 1) * 0.02;
+    const band = cut.fHi - cut.fLo;
+    let lo = cut.fLo + d;
+    lo = Math.max(0, Math.min(1 - band, lo));
+    cut.fLo = lo;
+    cut.fHi = lo + band;
+    paintCut();
+    needsDraw = true;
+  }, { passive: false });
+
+  window.addEventListener('resize', paintCut);
 
   /* ------------------------------------------------------------- Aufbau */
   function percentile(values, count, stride, lo, hi) {
@@ -481,6 +605,9 @@
     mode = opts[0][0];
     modeSel.value = String(mode);
 
+    cut.fLo = 0;
+    cut.fHi = 1;
+    setCutRange();
     resetView();
 
     const f2 = function (v) { return v.toFixed(2); };
