@@ -50,7 +50,35 @@ Je Punkt wird die Kamera mit dem kleinsten Bildradius genommen, also die am
 weitesten nadirnahe. Verdeckung wird nicht behandelt, was bei Nadiraufnahme
 und flachem Relief unkritisch ist.
 
-## Ablauf
+## Der ganze Weg auf einen Knopf
+
+Der Ablauf unten ist der Weg von Hand, so wie er 2026 gelaufen ist. Dasselbe
+gibt es inzwischen als Pipeline mit kleiner Oberfläche in
+[`colorize_pipeline/`](colorize_pipeline/README.md). Dort wählt man eine
+Punktwolke, einen Ordner mit den Bildern des Fluges und bekommt die farbige
+Wolke.
+
+```bash
+python3 -m colorize_pipeline.gui
+```
+
+![Die Oberfläche der Pipeline](bilder/pipeline-gui.png)
+
+Der Schritt, welcher früher von Hand in RViz lief, ist die Ausrichtung der
+Kameras auf die LiDAR-Karte. Der läuft jetzt automatisch, weil zwischen dem
+ENU-System und dem LiDAR-Rahmen eine **reine Drehung um die Hochachse** liegt,
+die Restneigung ist exakt null. Beide Rahmen sind lotrecht, das ENU-System per
+Definition und die SLAM-Karte über die IMU. Statt sieben Freiheitsgraden
+bleiben vier, und die findet eine Kreuzkorrelation über Draufsichten plus ein
+Feinschliff gegen das Höhenmodell des LiDAR.
+
+Für den Datensatz hier kommt die Automatik auf 91,68 Grad gegenüber 92,513
+Grad von Hand und färbt ebenfalls 100 % ein. Nachgemessen an der Farbstreuung
+zwischen den Kameras an Höhenkanten liegt sie sogar leicht vorn. Wer trotzdem
+nachziehen will, bekommt die Ausrichtung vor dem Einfärben als Draufsicht mit
+vier Reglern vorgelegt.
+
+## Ablauf von Hand
 
 ```bash
 cd gaussian_splat_avata360
@@ -127,6 +155,7 @@ docs/                               ausführliche Doku im MediaWiki-Format
   DRZ_Colorize_Pipeline.mediawiki   kompletter Weg inklusive Fehlversuchen
   M4T_Colorize.mediawiki            Kurzfassung der Reprojektion
   M4T_LiDAR_Combine_Detail.mediawiki  Detaildoku nur zur M4T-Kombination
+colorize_pipeline/                  die Pipeline mit Oberfläche
 gaussian_splat_avata360/            alle Skripte und RViz-Konfigurationen
   output/                           Transformationen, Kameraposen
   m4t_work/m4t_gps.json             RTK-Geotag je Bild
