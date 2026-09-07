@@ -101,6 +101,12 @@ Binärmüll zu öffnen. Sie liest PCD in `ascii`, `binary` und
 `binary_compressed` sowie PLY in `ascii` und beiden Binärvarianten. Gefärbt
 wird nach RGB, Höhe oder einem Skalarfeld wie `intensity`.
 
+Dazu zwei Werkzeuge, welche beim Auswerten helfen. Die Leiste am rechten Rand
+schneidet die Wolke in der Höhe, mit zwei Griffen wie bei einem Schichtmodell,
+damit man ein Dach abnehmen und in ein Gebäude hineinschauen kann. Und mit
+`Messen` lässt sich der Abstand zwischen zwei angeklickten Punkten bestimmen,
+er steht in Metern an der Verbindungslinie.
+
 ```bash
 ln -sfn "$PWD/vscode-pointcloud-viewer" \
         ~/.vscode/extensions/lenakremer.pointcloud-viewer-0.1.0
@@ -109,7 +115,10 @@ ln -sfn "$PWD/vscode-pointcloud-viewer" \
 Danach VS Code neu starten. Näheres in
 [vscode-pointcloud-viewer/README.md](vscode-pointcloud-viewer/README.md).
 
-![Punktwolken-Viewer in VS Code](bilder/vscode-viewer.png)
+![merged_FinlaDRZ_m4t_manual2.ply im Punktwolken-Viewer](bilder/vscode-viewer.png)
+
+Zu sehen ist `merged_FinlaDRZ_m4t_manual2.ply`, also das Ergebnis dieser
+Pipeline. Gemessen wird zwischen zwei Containern, 42,70 m.
 
 ## Struktur
 

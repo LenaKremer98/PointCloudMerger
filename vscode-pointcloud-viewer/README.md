@@ -4,7 +4,11 @@ Zeigt `.pcd` und `.ply` direkt im Editor an, statt die Datei als Binärmüll zu
 öffnen. Gebaut für die Wolken aus diesem Repo, funktioniert aber mit jeder
 Datei in diesen Formaten.
 
-![Höhenfarbe einer Mid360-Aufnahme](../bilder/vscode-viewer.png)
+![Die eingefärbte DRZ-Karte im Viewer, mit Messung](../bilder/vscode-viewer.png)
+
+Oben `merged_FinlaDRZ_m4t_manual2.ply`, die mit den M4T-Bildern eingefärbte
+LiDAR-Karte. Gemessen wird zwischen zwei Containern, der Abstand steht an der
+Linie. Rechts die Leiste für den Höhenschnitt.
 
 ## Was drin ist
 
@@ -53,6 +57,11 @@ dabei der Kamera am nächsten steht. Gesucht wird nur unter den sichtbaren
 Punkten, ein aktiver Höhenschnitt schließt also alles Weggeschnittene aus.
 Gemessen wird in den Einheiten der Datei, bei den Wolken aus diesem Repo sind
 das Meter.
+
+![Dieselbe Karte bei 6,8 m gekappt](../bilder/vscode-viewer-schnitt.png)
+
+Dieselbe Karte, oben bei 6,8 m abgeschnitten. Das Dach der Halle ist weg und
+man sieht hinein.
 
 ## Installieren
 
