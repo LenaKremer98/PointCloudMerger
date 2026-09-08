@@ -5,8 +5,9 @@ Mäanderfluges der DJI Matrice 4T zusammenbringen und einfärben.
 
 Die Daten stammen von einer DRZ-Mission am 20.05.2026. Geflogen wurden zwei
 Plattformen unabhängig voneinander. Die Super-Drohne hat mit dem Mid360 und
-FAST-LIO drei Teilkarten aufgenommen, welche danach von Hand zu
-`merged_FinlaDRZ.pcd` zusammengesetzt wurden. Die M4T ist dieselbe Fläche als
+FAST-LIO drei Teilkarten aufgenommen, welche danach mit dem Werkzeug aus
+[`pcmerge_tool/`](pcmerge_tool/README.md) von Hand zu `merged_FinlaDRZ.pcd`
+zusammengesetzt wurden. Die M4T ist dieselbe Fläche als
 Gebietsroute abgeflogen und hat dabei 255 Nadir-Bildpaare aus RGB und Thermal
 mit RTK-Geotags aufgenommen.
 
@@ -121,6 +122,32 @@ hier irreführend. `merged_FinlaDRZ_m4t_refined.ply` also nicht verwenden.
 Die verworfenen Skripte liegen trotzdem im Repo, damit die Doku vollständig
 bleibt.
 
+## Teilkarten zu einer Wolke zusammensetzen
+
+Vor der Einfärbung steht das Zusammensetzen. Dafür liegt in
+[`pcmerge_tool/`](pcmerge_tool/README.md) eine eigene Oberfläche, welche
+mehrere Wolken nebeneinander in Slots hält, sie gegeneinander ausrichtet und
+als eine Datei speichert.
+
+```bash
+cd pcmerge_tool && ./run.sh
+```
+
+Geladen wird aus PCD-Dateien oder direkt aus einem ROS-2-Bag. Das Ausrichten
+geht von Hand über sechs Felder für Verschiebung und Drehung, automatisch über
+Fast Global Registration mit anschließendem ICP, oder über drei angeklickte
+Punktpaare, wenn die Überlappung für die Automatik nicht reicht. Dazu kommen
+Werkzeuge zum Wegschneiden, also Rechteck, Lasso, Kugelpinsel und ein Prisma
+aus Polygon und Höhe, damit Ausreißer und Fremdkörper nicht in der Karte
+landen.
+
+Für den Datensatz hier wurden damit die drei Mid360-Teilkarten
+`Super_Mid360_2026-05-20_15-10-55/15-24-25/15-27-57.pcd` zu
+`merged_FinlaDRZ.pcd` mit 1.025.183 Punkten zusammengeschoben. Weil zwischen
+den Aufnahmen FAST-LIO neu gestartet wurde, hat jede Teilkarte ihren eigenen
+Ursprung, und genau deshalb fehlt der fertigen Karte die durchgehende
+Trajektorie, welche die Einfärbung sonst benutzt hätte.
+
 ## Wolken in VS Code anschauen
 
 Im Ordner `vscode-pointcloud-viewer/` liegt eine kleine VS-Code-Extension,
@@ -156,6 +183,7 @@ docs/                               ausführliche Doku im MediaWiki-Format
   M4T_Colorize.mediawiki            Kurzfassung der Reprojektion
   M4T_LiDAR_Combine_Detail.mediawiki  Detaildoku nur zur M4T-Kombination
 colorize_pipeline/                  die Pipeline mit Oberfläche
+pcmerge_tool/                       Teilkarten zu einer Wolke zusammensetzen
 gaussian_splat_avata360/            alle Skripte und RViz-Konfigurationen
   output/                           Transformationen, Kameraposen
   m4t_work/m4t_gps.json             RTK-Geotag je Bild
@@ -190,5 +218,6 @@ und ROS 2 Humble, aber kein pycolmap.
 - NumPy, SciPy, Pillow
 - pycolmap, nur für `export_m4t_cameras.py` und `export_m4t_points.py`
 - Open3D 0.19 für Ausrichtung, Rendering und den Hover-Viewer
+- PyQt5 und VTK, nur für die Oberfläche von `pcmerge_tool`
 - ROS 2 Humble mit RViz2 für die Handjustage und die Anzeige
 - DJI Thermal SDK, nur für echte Temperaturen
