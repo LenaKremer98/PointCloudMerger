@@ -26,7 +26,6 @@ Die Thermal-Variante und die Wolke mit echten Temperaturwerten in °C lassen
 sich mit den Skripten aus denselben Eingangsdaten erzeugen, liegen aber wegen
 der Dateigröße nicht im Repo.
 
-![Draufsicht der eingefärbten Karte](bilder/m4t_colored_topdown.png)
 
 ## Warum der Umweg über COLMAP
 
