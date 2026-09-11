@@ -3,10 +3,10 @@
 LiDAR-Punktwolke der Super-Drohne (Livox Mid360) mit den Luftbildern eines
 Mäanderfluges der DJI Matrice 4T zusammenbringen und einfärben.
 
-Die Daten stammen von einer DRZ-Mission am 20.05.2026. Geflogen wurden zwei
+Die Daten stammen von einer Mission am 20.05.2026. Geflogen wurden zwei
 Plattformen unabhängig voneinander. Die Super-Drohne hat mit dem Mid360 und
 FAST-LIO drei Teilkarten aufgenommen, welche danach mit dem Werkzeug aus
-[`pcmerge_tool/`](pcmerge_tool/README.md) von Hand zu `merged_FinlaDRZ.pcd`
+[`pcmerge_tool/`](pcmerge_tool/README.md) von Hand zu `merged_Finla.pcd`
 zusammengesetzt wurden. Die M4T ist dieselbe Fläche als
 Gebietsroute abgeflogen und hat dabei 255 Nadir-Bildpaare aus RGB und Thermal
 mit RTK-Geotags aufgenommen.
